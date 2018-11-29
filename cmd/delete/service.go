@@ -19,6 +19,7 @@ package delete
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/triggermesh/tm/pkg/client"
@@ -44,5 +45,14 @@ func cmdDeleteService(clientset *client.ConfigSet) *cobra.Command {
 
 // DeleteService remove knative service object
 func (s Service) DeleteService(clientset *client.ConfigSet) error {
+	buildtemplates, err := clientset.Build.BuildV1alpha1().BuildTemplates(clientset.Namespace).List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, v := range buildtemplates.Items {
+		if strings.HasPrefix(v.Name, s.Name+"-") {
+			BuildTemplate([]string{v.Name}, clientset)
+		}
+	}
 	return clientset.Serving.ServingV1alpha1().Services(clientset.Namespace).Delete(s.Name, &metav1.DeleteOptions{})
 }

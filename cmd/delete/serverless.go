@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	p "path"
+	"sync"
 
 	"github.com/triggermesh/tm/pkg/client"
 	"github.com/triggermesh/tm/pkg/file"
@@ -30,6 +31,7 @@ type Service struct {
 
 // DeleteYAML removes functions defined in serverless.yaml file
 func (s *Service) DeleteYAML(path string, functions []string, clientset *client.ConfigSet) (err error) {
+	var wg sync.WaitGroup
 	if file.IsGit(path) {
 		// fmt.Printf("Cloning %s\n", path)
 		if path, err = file.Clone(path); err != nil {
@@ -68,14 +70,20 @@ func (s *Service) DeleteYAML(path string, functions []string, clientset *client.
 		if len(definition.Service) != 0 && s.Name != definition.Service {
 			name = fmt.Sprintf("%s-%s", definition.Service, name)
 		}
-		tmp := Service{
+		service := Service{
 			Name: fmt.Sprintf("%s-%s", s.Name, name),
 		}
-		fmt.Printf("Deleting %s\n", tmp.Name)
-		if err = tmp.DeleteService(clientset); err != nil {
-			fmt.Println(err)
-		}
+		fmt.Printf("Deleting %s\n", service.Name)
+
+		wg.Add(1)
+		go func(service Service) {
+			defer wg.Done()
+			if err = service.DeleteService(clientset); err != nil {
+				fmt.Println(err)
+			}
+		}(service)
 	}
+
 	for _, include := range definition.Include {
 		path = p.Dir(path) + "/" + include
 		if file.IsRemote(include) {
@@ -84,9 +92,15 @@ func (s *Service) DeleteYAML(path string, functions []string, clientset *client.
 			}
 			path = path + "/serverless.yaml"
 		}
-		if err = s.DeleteYAML(path, functions, clientset); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(path string, functions []string) {
+			defer wg.Done()
+			if err = s.DeleteYAML(path, functions, clientset); err != nil {
+				fmt.Println(err)
+			}
+		}(path, functions)
 	}
+	wg.Wait()
+
 	return nil
 }

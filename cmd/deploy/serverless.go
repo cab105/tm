@@ -17,7 +17,8 @@ package deploy
 import (
 	"errors"
 	"fmt"
-	p "path"
+	"path"
+	"sync"
 
 	"github.com/triggermesh/tm/cmd/delete"
 	"github.com/triggermesh/tm/pkg/client"
@@ -29,7 +30,11 @@ import (
 
 // DeployYAML deploys functions defined in serverless.yaml file
 func (s *Service) DeployYAML(functions []string, clientset *client.ConfigSet) (services []Service, err error) {
+	servicesChan := make(chan []Service)
+	defer close(servicesChan)
+	var wg sync.WaitGroup
 	var root bool
+
 	if s.YAML, err = getYAML(s.YAML); err != nil {
 		return nil, err
 	}
@@ -57,7 +62,7 @@ func (s *Service) DeployYAML(functions []string, clientset *client.ConfigSet) (s
 	if len(definition.Provider.Runtime) != 0 {
 		s.Buildtemplate = definition.Provider.Runtime
 	}
-	workdir := p.Dir(s.YAML)
+	workdir := path.Dir(s.YAML)
 
 	for name, function := range definition.Functions {
 		pass := false
@@ -99,11 +104,16 @@ func (s *Service) DeployYAML(functions []string, clientset *client.ConfigSet) (s
 			service.Env = append(service.Env, k+":"+v)
 		}
 		service.Env = append(service.Env, s.Env...)
-
-		if err := service.Deploy(clientset); err != nil {
-			return nil, err
-		}
 		services = append(services, service)
+
+		wg.Add(1)
+		go func(service Service) {
+			defer wg.Done()
+			fmt.Printf("Deploying %s\n", service.Name)
+			if err = service.Deploy(clientset); err != nil {
+				fmt.Println(err)
+			}
+		}(service)
 	}
 
 	for _, include := range definition.Include {
@@ -111,12 +121,21 @@ func (s *Service) DeployYAML(functions []string, clientset *client.ConfigSet) (s
 		if file.IsRemote(include) {
 			s.YAML = include
 		}
-		subServices, err := s.DeployYAML(functions, clientset)
-		if err != nil {
-			return nil, err
-		}
-		services = append(services, subServices...)
+		wg.Add(1)
+		go func(s Service) {
+			defer wg.Done()
+			subServices, err := s.DeployYAML(functions, clientset)
+			if err != nil {
+				fmt.Println(err)
+			}
+			servicesChan <- subServices
+		}(*s)
 	}
+
+	for s := range servicesChan {
+		services = append(services, s...)
+	}
+	wg.Wait()
 
 	if root && len(functions) == 0 {
 		if err = s.removeOrphans(services, clientset); err != nil {
@@ -126,19 +145,19 @@ func (s *Service) DeployYAML(functions []string, clientset *client.ConfigSet) (s
 	return services, nil
 }
 
-func getYAML(path string) (string, error) {
-	if file.IsGit(path) {
+func getYAML(filePath string) (string, error) {
+	if file.IsGit(filePath) {
 		// fmt.Printf("Cloning %s\n", path)
-		localPath, err := file.Clone(path)
+		localPath, err := file.Clone(filePath)
 		if err != nil {
 			return "", err
 		}
-		path = localPath + "/serverless.yaml"
+		filePath = localPath + "/serverless.yaml"
 	}
-	if !file.IsLocal(path) {
+	if !file.IsLocal(filePath) {
 		return "", fmt.Errorf("Can't read %s", service.YAML)
 	}
-	return path, nil
+	return filePath, nil
 }
 
 func newService(function file.Function) Service {

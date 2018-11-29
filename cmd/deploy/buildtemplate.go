@@ -55,7 +55,7 @@ func (b *Buildtemplate) Deploy(clientset *client.ConfigSet) (string, error) {
 	}
 	// If argument is passed overwrite build template name
 	if len(b.Name) != 0 {
-		bt.ObjectMeta.Name = b.Name
+		bt.ObjectMeta.Name = fmt.Sprintf("%s-%s", b.Name, bt.ObjectMeta.Name)
 	}
 	// fmt.Printf("Creating \"%s\" build template\n", bt.ObjectMeta.Name)
 

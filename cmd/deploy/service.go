@@ -69,6 +69,7 @@ func (s *Service) Deploy(clientset *client.ConfigSet) error {
 
 	if _, err := describe.BuildTemplate(s.Buildtemplate, clientset); len(s.Buildtemplate) != 0 && err != nil {
 		buildtemplate := Buildtemplate{
+			Name:           s.Name,
 			File:           s.Buildtemplate,
 			RegistrySecret: s.RegistrySecret,
 		}
@@ -159,7 +160,6 @@ func (s *Service) Deploy(clientset *client.ConfigSet) error {
 	}
 
 	if file.IsLocal(s.Source) {
-		fmt.Printf("Uploading %s sources\n", s.Name)
 		if err := injectSources(s.Name, path.Dir(s.Source), clientset); err != nil {
 			return err
 		}
